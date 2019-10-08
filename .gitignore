@@ -3,6 +3,7 @@
 build/
 log/
 classes/
+app/keys/
 
 # Ignore Gradle GUI config
 gradle-app.setting
