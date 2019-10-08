@@ -35,17 +35,13 @@ import spark.Spark;
 
 /**
  * Application main entry point.
- * To execute, one needs to run something like:
- * <p>
- * <pre>
- * ./gradlew :app:shadowJar
- * java -jar ./app/build/libs/app-1.0.0-all.jar
- * </pre>
  */
 public class Application {
     private static final String CSRF_TOKEN_KEY = "csrf_token";
     private static final TokenClient tokenClient = initializeSDK();
     private static final Member cbpiiMember = initializeMember(tokenClient);
+    private static final Double AMOUNT = 10.0;
+    private static final String CURRENCY = "USD";
 
     /**
      * Main function.
@@ -57,7 +53,7 @@ public class Application {
         // Initializes the server
         Spark.port(3000);
 
-        // Endpoint for requesting access to account balances
+        // (redirect flow) Endpoint for requesting access to account balances
         Spark.get("/request-funds-confirmation", (req, res) -> {
             String callbackUrl = req.scheme() + "://" + req.host() + "/confirm-funds";
             String tokenRequestUrl = getTokenRequestUrl(callbackUrl, res);
@@ -67,18 +63,7 @@ public class Application {
             res.redirect(tokenRequestUrl);
             return null;
         });
-
-        // Endpoint for requesting access to account balances
-        Spark.post("/request-funds-confirmation-popup", (req, res) -> {
-            String callbackUrl = req.scheme() + "://" + req.host() + "/confirm-funds-popup";
-            String tokenRequestUrl = getTokenRequestUrl(callbackUrl, res);
-
-            // return the generated Token Request URL
-            res.status(200);
-            return tokenRequestUrl;
-        });
-
-        // Endpoint for transfer payment, called by client side after user approves payment.
+        // (redirect flow) Endpoint for transfer payment, called by client side after user approves payment.
         Spark.get("/confirm-funds", (req, res) -> {
             String callbackUrl = req.url() + "?" + req.queryString();
 
@@ -90,21 +75,24 @@ public class Application {
                     callbackUrl,
                     csrfToken);
 
-            // use access token's permissions from now on, set true if customer initiated request
-            String accountId = cbpiiMember.getTokenBlocking(callback.getTokenId())
-                    .getPayload()
-                    .getAccess()
-                    .getResources(0)
-                    .getFundsConfirmation()
-                    .getAccountId();
-            Representable representable = cbpiiMember.forAccessToken(callback.getTokenId(), false);
-            boolean result = representable.confirmFundsBlocking(accountId, 1.0, "GBP");
-
             // respond to script.js with JSON
-            return String.format("funds confirmed: %s", result);
+            return String.format(
+                    "Funds sufficient to cover a charge of %s %s: <b>%s<b/>",
+                    AMOUNT,
+                    CURRENCY,
+                    confirmFunds(callback.getTokenId()));
         });
 
-        // Endpoint for transfer payment, called by client side after user approves payment.
+        // (pop-up flow) Endpoint for requesting access to account balances
+        Spark.post("/request-funds-confirmation-popup", (req, res) -> {
+            String callbackUrl = req.scheme() + "://" + req.host() + "/confirm-funds-popup";
+            String tokenRequestUrl = getTokenRequestUrl(callbackUrl, res);
+
+            // return the generated Token Request URL
+            res.status(200);
+            return tokenRequestUrl;
+        });
+        // (pop-up flow) Endpoint for transfer payment, called by client side after user approves payment.
         Spark.get("/confirm-funds-popup", (req, res) -> {
             // parse JSON from data query param
             Gson gson = new Gson();
@@ -120,18 +108,12 @@ public class Application {
                     data,
                     csrfToken);
 
-            // use access token's permissions from now on, set true if customer initiated request
-            String accountId = cbpiiMember.getTokenBlocking(callback.getTokenId())
-                    .getPayload()
-                    .getAccess()
-                    .getResources(0)
-                    .getFundsConfirmation()
-                    .getAccountId();
-            Representable representable = cbpiiMember.forAccessToken(callback.getTokenId(), false);
-            boolean result = representable.confirmFundsBlocking(accountId, 1.0, "GBP");
-
             // respond to script.js with JSON
-            return String.format("funds confirmed: %s", result);
+            return String.format(
+                    "Funds sufficient to cover a charge of %s %s: <b>%s<b/>",
+                    AMOUNT,
+                    CURRENCY,
+                    confirmFunds(callback.getTokenId()));
         });
 
         // Serve the web page, stylesheet and JS script:
@@ -265,12 +247,12 @@ public class Application {
 
         // Create a token request to be stored
         TokenRequest tokenRequest = TokenRequest.fundsConfirmationRequestBuilder(
-                "ob-modelo",
+                "iron",
                 BankAccount.newBuilder()
                         .setDomestic(Domestic.newBuilder()
-                                .setAccountNumber("70000004")
-                                .setBankCode("700001")
-                                .setCountry("GB"))
+                                .setAccountNumber("12345678")
+                                .setBankCode("123456")
+                                .setCountry("US"))
                         .build())
                 .setToMemberId(cbpiiMember.memberId())
                 .setToAlias(cbpiiMember.firstAliasBlocking())
@@ -283,5 +265,17 @@ public class Application {
 
         // generate the Token request URL
         return tokenClient.generateTokenRequestUrlBlocking(requestId);
+    }
+
+    private static boolean confirmFunds(String tokenId) {
+        // use access token's permissions from now on, set true if customer initiated request
+        String accountId = cbpiiMember.getTokenBlocking(tokenId)
+                .getPayload()
+                .getAccess()
+                .getResources(0)
+                .getFundsConfirmation()
+                .getAccountId();
+        Representable representable = cbpiiMember.forAccessToken(tokenId, false);
+        return representable.confirmFundsBlocking(accountId, AMOUNT, CURRENCY);
     }
 }
